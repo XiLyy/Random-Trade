@@ -189,11 +189,14 @@ flowchart LR
 | コマンド | 内容 |
 | --- | --- |
 | `npm run dev` | 開発サーバー |
-| `npm run lint` / `npm run typecheck` / `npm test` | 静的チェックと単体テスト（CI でも実行） |
+| `npm run lint` / `npm run typecheck` / `npm test` | 静的チェックと単体テスト |
+| `npm run check` | 上の3つとビルドをまとめて実行する（CI の代わりに、コミット前に手元で実行） |
 | `npm run build` | `dist/` に静的ファイルを出力 |
+| `npm run build:pages` | GitHub Pages 用に `docs/app/` に出力 |
 
 - `vite.config.ts` で `base: './'` にしているので、`dist/` は GitHub Pages のようなサブパスでも、Vercel や Netlify のようなルートでも、そのまま置ける
-- CI（`.github/workflows/ci.yml`）で、lint・型チェック・単体テスト・ビルドを行う
+- GitHub Actions は使わない。代わりに `npm run check` を手元で実行する
+- GitHub Pages は「ブランチの `/docs` から配信」で公開する。ビルド済みのアプリを `docs/app/` にコミットし、`docs/index.html` から `app/` に移動させる。`docs/.nojekyll` で Jekyll の変換を止め、ファイルをそのまま配信する
 
 ## 11. 要件との対応
 
@@ -206,7 +209,7 @@ flowchart LR
 | FR-20〜26 チェック入力 | `CheckPanel.tsx`、`ImageEditor.tsx`（タップ）、`state/reducer.ts` |
 | FR-30〜37 出力 | `ExportPanel.tsx`、`lib/render.ts`、`lib/text.ts` |
 | NFR-03 端末内処理 | 外部通信なし。フッターに注意書き |
-| NFR-08 保守性 | `lib/` と `state/` の単体テスト、CI |
+| NFR-08 保守性 | `lib/` と `state/` の単体テスト、`npm run check` |
 
 ## 12. 次のフェーズへの拡張ポイント
 

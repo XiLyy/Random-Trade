@@ -38,9 +38,20 @@ npm test           # 単体テスト
 npm run lint       # oxlint
 npm run typecheck  # TypeScript の型チェック
 npm run build      # dist/ に静的ファイルを出力
+npm run check      # lint・型チェック・テスト・ビルドをまとめて実行（コミット前に実行）
 ```
 
-`dist/` は静的ファイルだけなので、GitHub Pages、Vercel、Netlify などにそのまま置けます（`base: './'` なので、サブパスでも動きます）。
+GitHub Actions は使っていないので、コミット前に手元で `npm run check` を実行してください。
+
+## GitHub Pages で公開する
+
+ビルド済みのファイルを `docs/app/` に置き、`docs/` をそのまま Pages で配信します（Actions は不要です）。
+
+1. アプリを変更したら `npm run build:pages` を実行し、`docs/app/` の変更もコミットする
+2. リポジトリの **Settings → Pages** で、**Source** を「Deploy from a branch」、**Branch** を公開したいブランチの `/docs` にする
+3. `https://<ユーザー名>.github.io/Random-Trade/` を開く（`docs/index.html` から `app/` に移動します）
+
+`base: './'` にしているので、Vercel や Netlify など、ほかの静的ホスティングにもそのまま置けます。
 
 ## 技術スタック
 
