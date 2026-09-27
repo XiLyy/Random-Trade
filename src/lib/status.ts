@@ -20,10 +20,6 @@ export function toggleStatus(current: ItemStatus, clicked: ItemStatus): ItemStat
   return current === clicked ? 'none' : clicked
 }
 
-export function displayName(item: TradeItem, index: number): string {
-  return item.name.trim() || `No.${index + 1}`
-}
-
 export function countByStatus(items: TradeItem[]): Record<ItemStatus, number> {
   const counts: Record<ItemStatus, number> = { none: 0, owned: 0, wanted: 0, extra: 0 }
   for (const item of items) counts[item.status]++

@@ -160,6 +160,7 @@ textarea {
   text-decoration: none;
   white-space: nowrap;
   cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
   transition:
     background 0.15s,
     border-color 0.15s,
@@ -201,6 +202,30 @@ textarea {
 
 .button--danger {
   color: var(--danger);
+}
+
+.button--x {
+  background: #0f1419;
+  border-color: #0f1419;
+  color: #fff;
+}
+
+.button--x:hover:not(:disabled) {
+  background: #272c30;
+  border-color: #272c30;
+}
+
+@media (prefers-color-scheme: dark) {
+  .button--x {
+    background: #f1edf6;
+    border-color: #f1edf6;
+    color: #0f1419;
+  }
+
+  .button--x:hover:not(:disabled) {
+    background: #fff;
+    border-color: #fff;
+  }
 }
 
 .button--ghost {
@@ -645,6 +670,16 @@ textarea {
 .trade-text {
   background: var(--surface-2);
   font-size: 0.9rem;
+}
+
+.x-count {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.x-count.is-over {
+  color: var(--danger);
+  font-weight: 700;
 }
 
 .toggle {
