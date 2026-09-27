@@ -4,17 +4,17 @@ import type { Rect } from '../types'
 import { SyntheticImage, drawGrid } from './synthetic'
 
 /** 検出した枠が、期待する商品の位置（ピクセル）を正しく囲んでいるか確かめる */
-function expectToCover(rect: Rect, img: SyntheticImage, x: number, y: number, size: number) {
+function expectToCover(rect: Rect, img: SyntheticImage, x: number, y: number, w: number, h = w) {
   const px = { x: rect.x * img.width, y: rect.y * img.height, w: rect.w * img.width, h: rect.h * img.height }
   const tolerance = Math.max(img.width, img.height) * 0.02
   expect(px.x).toBeLessThanOrEqual(x + 0.5)
   expect(px.y).toBeLessThanOrEqual(y + 0.5)
-  expect(px.x + px.w).toBeGreaterThanOrEqual(x + size - 0.5)
-  expect(px.y + px.h).toBeGreaterThanOrEqual(y + size - 0.5)
+  expect(px.x + px.w).toBeGreaterThanOrEqual(x + w - 0.5)
+  expect(px.y + px.h).toBeGreaterThanOrEqual(y + h - 0.5)
   expect(x - px.x).toBeLessThan(tolerance)
   expect(y - px.y).toBeLessThan(tolerance)
-  expect(px.x + px.w - (x + size)).toBeLessThan(tolerance)
-  expect(px.y + px.h - (y + size)).toBeLessThan(tolerance)
+  expect(px.x + px.w - (x + w)).toBeLessThan(tolerance)
+  expect(px.y + px.h - (y + h)).toBeLessThan(tolerance)
 }
 
 describe('detectItems', () => {
@@ -64,16 +64,48 @@ describe('detectItems', () => {
     rects.forEach((rect, i) => expectToCover(rect, img, positions[i].x, positions[i].y, 70))
   })
 
-  it('1つの商品が細い隙間で分かれていても、1つにまとめる', () => {
+  it('本体から少し離れた小さな部品（髪飾りなど）も、1つの枠にまとめる', () => {
     const img = new SyntheticImage(400, 300)
     const positions = drawGrid(img, 2, 3, { size: 80, gap: 40 })
-    // 各商品の中央に背景色の細い線を入れて、左右に分割する（透明なアクリル部分のイメージ）
-    for (const { x, y } of positions) img.fillRect(x + 39, y, 2, 80, [255, 255, 255])
+    // 各商品の右上に、3px 離れた小さな部品を置く
+    for (const { x, y } of positions) img.fillRect(x + 83, y + 6, 12, 12, [40, 40, 160])
 
     const rects = detectItems(img)
 
     expect(rects).toHaveLength(6)
-    rects.forEach((rect, i) => expectToCover(rect, img, positions[i].x, positions[i].y, 80))
+    // 本体（80×80）と部品を合わせた 95×80 の範囲を囲む
+    rects.forEach((rect, i) => expectToCover(rect, img, positions[i].x, positions[i].y, 95, 80))
+  })
+
+  it('すき間の細いカードの並びでも、すき間をまたぐ透かし文字があっても、1枚ずつ分ける', () => {
+    const img = new SyntheticImage(420, 330)
+    const positions = drawGrid(img, 3, 5, { size: 76, gap: 4, offsetX: 16, offsetY: 40 })
+    // 各段の中央を横切る「SAMPLE」の透かし（すき間もまたぐ）
+    for (let row = 0; row < 3; row++) {
+      const y = 40 + row * 80 + 34
+      img.fillRect(16, y, 396, 2, [90, 90, 90])
+      img.fillRect(16, y + 8, 396, 2, [90, 90, 90])
+    }
+
+    const rects = detectItems(img)
+
+    expect(rects).toHaveLength(15)
+    rects.forEach((rect, i) => expectToCover(rect, img, positions[i].x, positions[i].y, 76))
+  })
+
+  it('商品のすぐ下の商品名は、枠に含めない', () => {
+    const img = new SyntheticImage(400, 300)
+    const positions = drawGrid(img, 2, 3, { size: 80, gap: 40 })
+    // 商品の 4px 下に、商品名の文字の帯を置く（クロージングで本体とつながる距離）
+    for (const { x, y } of positions) img.fillRect(x + 10, y + 84, 60, 8, [40, 40, 40])
+
+    const rects = detectItems(img)
+
+    expect(rects).toHaveLength(6)
+    rects.forEach((rect, i) => {
+      expectToCover(rect, img, positions[i].x, positions[i].y, 80)
+      expect((rect.y + rect.h) * img.height).toBeLessThan(positions[i].y + 84)
+    })
   })
 
   it('色付きの台紙の上に並んだ商品も検出する', () => {

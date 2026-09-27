@@ -36,6 +36,9 @@ type RGB = [number, number, number]
 /** 背景の中に商品をまとめて載せた台紙がある場合に、何段まで内側を探すか */
 const MAX_DEPTH = 2
 
+/** くっついたかたまりを、行→列→…と何段まで入れ子に分割するか */
+const MAX_SPLIT_DEPTH = 4
+
 /** 感度を「背景とみなす色の距離（RGB のユークリッド距離）」に変換する */
 export function sensitivityToThreshold(sensitivity: number): number {
   return 10 + (100 - clamp(sensitivity, 0, 100)) * 0.4
@@ -67,28 +70,170 @@ function detectInRegion(img: ImageDataLike, region: Box, threshold: number, dept
   const radius = Math.max(1, Math.round(Math.max(img.width, img.height) * 0.006))
   const closed = erode(dilate(mask, rw, rh, radius), rw, rh, radius)
 
+  // 格子状に並んだ商品の間の「谷」を探すときの、1つの商品の最小の幅（画像の長辺の 2%）
+  const minSegment = Math.max(4, Math.round(Math.max(img.width, img.height) * 0.02))
+
   const result: Box[] = []
   for (const c of connectedComponents(closed, rw, rh)) {
-    const box: Box = { x0: c.x0 + region.x0, y0: c.y0 + region.y0, x1: c.x1 + region.x0, y1: c.y1 + region.y0 }
-    const boxArea = boxAreaOf(box)
-    if (boxArea < minArea || c.count < 16) continue
-
-    if (boxArea > regionArea * 0.5) {
-      // 範囲の大半を覆うかたまりは、商品をまとめて載せた台紙の可能性がある。
-      // その内側で背景を推定し直して、もう一度探す。
-      if (depth < MAX_DEPTH) {
-        const inner = detectInRegion(img, box, threshold, depth + 1)
-        if (inner.length >= 2) {
-          result.push(...inner)
-          continue
-        }
+    if (c.count < 16) continue
+    // すき間の細いカードの並びや、すき間をまたぐ透かし文字でつながったかたまりを、商品ごとに分ける
+    for (const piece of splitByGutters(mask, rw, c, minSegment)) {
+      const box: Box = {
+        x0: piece.x0 + region.x0,
+        y0: piece.y0 + region.y0,
+        x1: piece.x1 + region.x0,
+        y1: piece.y1 + region.y0,
       }
-      // 内側でも分けられないときは、背景を分離できなかったとみなして捨てる
-      continue
+      const boxArea = boxAreaOf(box)
+      if (boxArea < minArea) continue
+      if (boxArea > regionArea * 0.5) {
+        // 範囲の大半を覆うかたまりは、商品をまとめて載せた台紙の可能性がある。
+        // その内側で背景を推定し直して、もう一度探す。
+        if (depth < MAX_DEPTH) {
+          const inner = detectInRegion(img, box, threshold, depth + 1)
+          if (inner.length >= 2) {
+            result.push(...inner)
+            continue
+          }
+        }
+        // 内側でも分けられないときは、背景を分離できなかったとみなして捨てる
+        continue
+      }
+      result.push(box)
     }
-    result.push(box)
   }
   return result
+}
+
+/**
+ * 1つのかたまりに見えるものが、実は格子状に並んだ複数の商品かどうかを調べて分割する（XY-cut）。
+ *
+ * 列ごと（または行ごと）に前景の割合を数え、周りよりはっきり薄い「谷」を商品の間のすき間とみなす。
+ * すき間を透かし文字がまたいでいても、谷の部分は前景が少ないので見つけられる。
+ * 1つの商品を誤って切らないよう、分割後の断片がほぼ同じ大きさのときだけ分割する。
+ */
+function splitByGutters(mask: Uint8Array, stride: number, box: Box, minSegment: number, depth = 0): Box[] {
+  if (depth >= MAX_SPLIT_DEPTH) return [box]
+  const segments =
+    findGridSegments(mask, stride, box, 'x', minSegment) ??
+    findGridSegments(mask, stride, box, 'y', minSegment) ??
+    findCaption(mask, stride, box)
+  if (!segments) return [box]
+  return segments.flatMap((segment) => {
+    const trimmed = trimToForeground(mask, stride, segment)
+    return trimmed ? splitByGutters(mask, stride, trimmed, minSegment, depth + 1) : []
+  })
+}
+
+/**
+ * 商品のすぐ上か下に、何も描かれていない行をはさんで細い帯（商品名などの文字）があれば切り離す。
+ * 切り離した帯は、あとの外れ値の除去で小さすぎるものとして捨てられる。
+ */
+function findCaption(mask: Uint8Array, stride: number, box: Box): Box[] | null {
+  const height = box.y1 - box.y0
+  const empty = new Uint8Array(height)
+  for (let i = 0; i < height; i++) {
+    const row = (box.y0 + i) * stride
+    let any = 0
+    for (let x = box.x0; x < box.x1 && !any; x++) any = mask[row + x]
+    empty[i] = any ? 0 : 1
+  }
+  // 何も描かれていない行が続く区間のうち、いちばん長いもので上下に分ける
+  let best: [number, number] | null = null
+  for (let i = 0; i < height; ) {
+    if (!empty[i]) {
+      i++
+      continue
+    }
+    let j = i
+    while (j < height && empty[j]) j++
+    if (i > 0 && j < height && (!best || j - i > best[1] - best[0])) best = [i, j]
+    i = j
+  }
+  if (!best) return null
+  const top = best[0]
+  const bottom = height - best[1]
+  if (Math.min(top, bottom) > Math.max(top, bottom) * 0.25) return null
+  return [
+    { x0: box.x0, x1: box.x1, y0: box.y0, y1: box.y0 + best[0] },
+    { x0: box.x0, x1: box.x1, y0: box.y0 + best[1], y1: box.y1 },
+  ]
+}
+
+/** axis 方向に並んだ、ほぼ同じ大きさの断片に分けられるなら、その断片を返す */
+function findGridSegments(
+  mask: Uint8Array,
+  stride: number,
+  box: Box,
+  axis: 'x' | 'y',
+  minSegment: number,
+): Box[] | null {
+  const start = axis === 'x' ? box.x0 : box.y0
+  const length = (axis === 'x' ? box.x1 : box.y1) - start
+  const across = axis === 'x' ? box.y1 - box.y0 : box.x1 - box.x0
+  if (length < minSegment * 2) return null
+
+  // 列（行）ごとの前景の割合
+  const ratio = new Float32Array(length)
+  for (let i = 0; i < length; i++) {
+    let count = 0
+    if (axis === 'x') {
+      for (let y = box.y0; y < box.y1; y++) count += mask[y * stride + start + i]
+    } else {
+      const row = (start + i) * stride
+      for (let x = box.x0; x < box.x1; x++) count += mask[row + x]
+    }
+    ratio[i] = count / across
+  }
+
+  // 商品の部分の典型的な濃さ（上位 20% の値）の 3 割以下を「谷」とする
+  const dense = Array.from(ratio).sort((a, b) => a - b)[Math.floor(length * 0.8)]
+  const limit = dense * 0.3
+  const spans: [number, number][] = []
+  let segmentStart = 0
+  let i = 0
+  while (i < length) {
+    if (ratio[i] > limit) {
+      i++
+      continue
+    }
+    let j = i
+    while (j < length && ratio[j] <= limit) j++
+    if (i > segmentStart) spans.push([segmentStart, i])
+    segmentStart = j
+    i = j
+  }
+  if (segmentStart < length) spans.push([segmentStart, length])
+
+  const kept = spans.filter(([a, b]) => b - a >= minSegment)
+  if (kept.length < 2) return null
+  const sizes = kept.map(([a, b]) => b - a)
+  if (Math.max(...sizes) > Math.min(...sizes) * 1.5) return null
+
+  return kept.map(([a, b]) =>
+    axis === 'x'
+      ? { x0: start + a, x1: start + b, y0: box.y0, y1: box.y1 }
+      : { x0: box.x0, x1: box.x1, y0: start + a, y1: start + b },
+  )
+}
+
+/** 範囲の中の前景ピクセルを囲む最小の矩形。前景がなければ null */
+function trimToForeground(mask: Uint8Array, stride: number, box: Box): Box | null {
+  let x0 = box.x1
+  let y0 = box.y1
+  let x1 = box.x0 - 1
+  let y1 = box.y0 - 1
+  for (let y = box.y0; y < box.y1; y++) {
+    const row = y * stride
+    for (let x = box.x0; x < box.x1; x++) {
+      if (!mask[row + x]) continue
+      if (x < x0) x0 = x
+      if (x > x1) x1 = x
+      if (y < y0) y0 = y
+      if (y > y1) y1 = y
+    }
+  }
+  return x1 < x0 ? null : { x0, y0, x1: x1 + 1, y1: y1 + 1 }
 }
 
 /**
