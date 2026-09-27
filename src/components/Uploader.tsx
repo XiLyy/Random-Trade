@@ -16,7 +16,7 @@ export function Uploader({ onFile, error }: Props) {
   }
 
   return (
-    <section className="uploader">
+    <div className="uploader">
       <label
         className={`dropzone${dragging ? ' is-dragging' : ''}`}
         onDragOver={(e) => {
@@ -47,21 +47,6 @@ export function Uploader({ onFile, error }: Props) {
           {error}
         </p>
       )}
-
-      <ol className="steps">
-        <li>
-          <strong>画像をアップ</strong>
-          <span>公式のラインナップ画像を選ぶと、商品を自動で見つけて枠で囲みます。</span>
-        </li>
-        <li>
-          <strong>チェック</strong>
-          <span>商品ごとに「所持」「未所持」「余分」をチェックします。</span>
-        </li>
-        <li>
-          <strong>画像を出力</strong>
-          <span>余分に「譲」、未所持に「求」のマークが付いた画像ができます。</span>
-        </li>
-      </ol>
-    </section>
+    </div>
   )
 }

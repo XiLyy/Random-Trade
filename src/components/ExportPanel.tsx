@@ -2,13 +2,16 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { renderOutputBlob } from '../lib/render'
 import { hasTradeTargets } from '../lib/status'
 import { buildTradeText } from '../lib/text'
-import type { LoadedImage, OutputOptions, TradeItem } from '../lib/types'
+import type { LoadedImage, OutputOptions, PostSettings, TradeItem } from '../lib/types'
+import { PostSettingsForm } from './PostSettingsForm'
 
 interface Props {
   image: LoadedImage
   items: TradeItem[]
   options: OutputOptions
   onOptionsChange: (options: OutputOptions) => void
+  postSettings: PostSettings
+  onPostSettingsChange: (settings: PostSettings) => void
 }
 
 interface Result {
@@ -24,15 +27,24 @@ function outputFileName(date = new Date()): string {
   return `random-trade_${stamp}.png`
 }
 
-export function ExportPanel({ image, items, options, onOptionsChange }: Props) {
+export function ExportPanel({ image, items, options, onOptionsChange, postSettings, onPostSettingsChange }: Props) {
   const [result, setResult] = useState<Result | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const previewRef = useRef<HTMLDivElement>(null)
 
-  const text = useMemo(() => buildTradeText(items, options), [items, options])
-  const signature = useMemo(() => JSON.stringify({ url: image.url, items, options }), [image.url, items, options])
+  const text = useMemo(() => buildTradeText(items, postSettings), [items, postSettings])
+  // 画像に描くもの（枠・状態・個数）だけで、作り直しが必要かを判断する。募集文や商品名は画像に入らない
+  const signature = useMemo(
+    () =>
+      JSON.stringify({
+        url: image.url,
+        marks: items.map(({ rect, status, extraCount }) => [rect, status, extraCount]),
+        options,
+      }),
+    [image.url, items, options],
+  )
   const canExport = hasTradeTargets(items)
   const stale = result !== null && result.signature !== signature
 
@@ -88,30 +100,6 @@ export function ExportPanel({ image, items, options, onOptionsChange }: Props) {
       <h2 id="export-heading">画像を出力</h2>
 
       <div className="field-group">
-        <label className="text-field">
-          <span>タイトル（任意）</span>
-          <input
-            type="text"
-            value={options.title}
-            maxLength={60}
-            placeholder="例：〇〇 缶バッジ 第2弾"
-            onChange={(e) => update({ title: e.target.value })}
-          />
-        </label>
-        <label className="text-field">
-          <span>メモ（任意）</span>
-          <textarea
-            value={options.note}
-            maxLength={200}
-            rows={2}
-            placeholder="例：郵送のみ／同種交換を優先します"
-            onChange={(e) => update({ note: e.target.value })}
-          />
-        </label>
-        <label className="toggle">
-          <input type="checkbox" checked={options.showLegend} onChange={(e) => update({ showLegend: e.target.checked })} />
-          <span>画像の下に凡例（譲・求の意味と種類数）を入れる</span>
-        </label>
         <label className="toggle">
           <input type="checkbox" checked={options.dimOthers} onChange={(e) => update({ dimOthers: e.target.checked })} />
           <span>所持・未選択の商品を薄くする</span>
@@ -157,10 +145,14 @@ export function ExportPanel({ image, items, options, onOptionsChange }: Props) {
 
       <div className="field-group">
         <h3>募集テキスト</h3>
-        <textarea className="trade-text" readOnly value={text} rows={Math.min(8, text.split('\n').length + 1)} />
+        <textarea className="trade-text" readOnly value={text} rows={Math.min(10, text.split('\n').length + 1)} />
         <button type="button" className="button" onClick={handleCopy}>
           {copied ? 'コピーしました' : 'テキストをコピー'}
         </button>
+        <details className="post-settings-edit">
+          <summary>募集文の設定を変える</summary>
+          <PostSettingsForm value={postSettings} onChange={onPostSettingsChange} />
+        </details>
       </div>
     </section>
   )

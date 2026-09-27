@@ -239,10 +239,8 @@ textarea {
 }
 
 .uploader {
-  max-width: 640px;
-  margin: 0 auto;
   display: grid;
-  gap: 20px;
+  gap: 12px;
 }
 
 .dropzone {
@@ -288,42 +286,82 @@ textarea {
   color: var(--muted);
 }
 
-.steps {
-  list-style: none;
-  counter-reset: step;
-  margin: 0;
-  padding: 0;
+/* ---------- 最初の画面（募集文 → 画像） ---------- */
+
+.start {
+  max-width: 640px;
+  margin: 0 auto;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+}
+
+.step-heading {
+  display: flex;
+  align-items: center;
   gap: 10px;
 }
 
-.steps li {
-  counter-increment: step;
-  display: grid;
-  grid-template-columns: 32px 1fr;
-  column-gap: 12px;
-  padding: 12px 14px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-}
-
-.steps li::before {
-  content: counter(step);
-  grid-row: span 2;
+.step-heading__no {
   display: grid;
   place-items: center;
-  width: 32px;
-  height: 32px;
+  width: 30px;
+  height: 30px;
   border-radius: 50%;
-  background: var(--accent-weak);
-  color: var(--accent-strong);
+  background: var(--accent);
+  color: #fff;
+  font-size: 0.95rem;
   font-weight: 800;
+  flex-shrink: 0;
 }
 
-.steps span {
-  font-size: 0.85rem;
+.post-settings {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+}
+
+.post-preview {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+
+.post-preview__label {
+  font-size: 0.75rem;
+  font-weight: 700;
   color: var(--muted);
+}
+
+.post-preview__text {
+  margin: 0;
+  font: inherit;
+  font-size: 0.85rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.post-settings-edit {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0 12px;
+}
+
+.post-settings-edit summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--accent-strong);
+  cursor: pointer;
+}
+
+.post-settings-edit[open] {
+  padding-bottom: 12px;
 }
 
 /* ---------- 作業画面 ---------- */

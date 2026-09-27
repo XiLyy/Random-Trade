@@ -33,11 +33,23 @@ export interface LoadedImage {
   element: HTMLImageElement
 }
 
+/** 出力画像のオプション。画像には譲・求の印だけを描き、文字は募集文に入れる */
 export interface OutputOptions {
-  title: string
-  note: string
-  showLegend: boolean
+  /** 所持・未選択の商品を薄くする */
   dimOthers: boolean
+}
+
+/**
+ * SNS 投稿用の募集文の設定。公演・イベント・アーティストごとに最初に決め、
+ * 画像を差し替えてもそのまま使う
+ */
+export interface PostSettings {
+  /** 募集文の最初に入れる文（例：【交換】〇〇 LIVE TOUR 2026 ランダムブロマイド） */
+  header: string
+  /** 譲・求のあとに入れる補足（例：郵送のみ／同種交換を優先します） */
+  note: string
+  /** ハッシュタグ。空白で区切り、# は付けても付けなくてもよい */
+  hashtags: string
 }
 
 /** ImageData と同じ形。テストでは DOM なしで作れるようにこの型を受け取る */
