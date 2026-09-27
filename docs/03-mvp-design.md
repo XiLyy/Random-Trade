@@ -38,7 +38,7 @@ src/
 │   ├── ImageEditor.tsx     # S-02 画像と枠の重ね表示、枠の追加・移動・リサイズ、タップでのチェック
 │   ├── EditPanel.tsx       # S-03 枠の調整（再認識・グリッド分割・削除）
 │   ├── CheckPanel.tsx      # S-04 チェック（集計・商品一覧・チェックボックス）
-│   ├── ExportPanel.tsx     # S-05 出力（オプション・プレビュー・保存・共有・テキスト）
+│   ├── ExportPanel.tsx     # S-05 出力（オプション・プレビュー・X に投稿・保存・テキスト）
 │   ├── labels.ts           # 画面の表示名
 │   └── useElementWidth.ts  # 要素の表示幅を追うフック
 ├── lib/                    # UI に依存しないロジック（単体テストの対象）
@@ -47,6 +47,8 @@ src/
 │   ├── detect.ts           # 商品の自動認識
 │   ├── render.ts           # 出力画像のレイアウト計算と描画
 │   ├── text.ts             # 募集テキストの生成
+│   ├── share.ts            # X への投稿（投稿画面の URL・文字数の目安・投稿方法の選択）
+│   ├── postSettings.ts     # 募集文の設定の保存
 │   ├── status.ts           # チェック状態の扱い
 │   └── image.ts            # 画像ファイルの読み込み（ブラウザ専用）
 └── state/
@@ -73,7 +75,7 @@ flowchart TB
   State -- "state" --> UI
   UI -- "縮小した ImageData" --> Detect
   Detect -- "枠（割合の座標）" --> State
-  UI --> Render --> Canvas -- "PNG" --> Out["保存 / 共有"]
+  UI --> Render --> Canvas -- "PNG" --> Out["X に投稿 / 保存"]
   UI --> Text -- "テキスト" --> Clip["クリップボード"]
 ```
 
@@ -175,7 +177,20 @@ flowchart LR
 - `drawOutput()` が、計算結果を Canvas 2D に描く。枠 → バッジの順に描き、バッジが隣の枠の線に隠れないようにする
 - 募集文（`lib/text.ts`）は画像に入らないので、募集文の設定を変えても出力画像の作り直しは求めない
 - 長辺が 4096px を超える画像は縮小して出力する（iOS のキャンバスの上限への対策）
-- `canvas.toBlob()` で PNG にし、オブジェクトURLでプレビューと保存に使う。共有は Web Share API（`navigator.canShare({ files })` が true のときだけボタンを出す）
+- `canvas.toBlob()` で PNG にし、オブジェクトURLでプレビューと保存に使う
+
+### 8.1 X に投稿（`lib/share.ts`）
+
+X の Web の投稿画面（`https://twitter.com/intent/tweet?text=...`）は文しか受け取れず、画像を添付できない。API での投稿はサーバーと OAuth が必要になり、「サーバーを持たない」方針に合わない。そこで端末に応じて方法を変える。
+
+| 端末 | 条件 | 動き |
+| --- | --- | --- |
+| スマホ・タブレット | `navigator.canShare({ files, text })` が true、かつ指で操作する端末（`pointer: coarse`） | 共有メニュー（`navigator.share`）で画像と募集文を渡す。「X」を選ぶと X アプリの投稿画面に両方が入る |
+| PC など | 上以外 | クリックの処理の中ですぐに投稿画面を開き（ポップアップとして止められないように）、画像を保存する。保存した画像を投稿画面に添付してもらう |
+
+- PC の共有メニューには X が出ないことが多いため、ファイルを共有できても指で操作する端末に限って共有メニューを使う
+- 出力後にチェックが変わった（画像が古い）ときは、ボタンを押せなくする
+- 文字数の目安は twitter-text の重み付け（ラテン文字や一部の記号は 1、それ以外は 2、上限 280）で数える。URL の短縮は考えない
 
 ## 9. テスト
 
@@ -186,9 +201,10 @@ flowchart LR
 | `detect.ts` | 格子状の商品をすべて読む順に検出する／JPEG のようなノイズ／商品名やタイトルの文字を除く／離れた小さな部品の統合／すき間が細く透かし文字がまたぐカードの分割／すぐ下の商品名を枠に含めない／台紙／透明な背景／暗い背景／段のずれ／何もない画像／感度 |
 | `geometry.ts` | グリッド分割、読む順の並べ替え、矩形の補正 |
 | `render.ts` | マークの対象と座標、元の画像と同じ大きさ（文字の帯を足さない）、薄く表示、4096px への縮小、バッジの大きさ |
-| `text.ts` | 募集文の書式（ヘッダ・譲・求・補足・ハッシュタグ）、ヘッダからハッシュタグを作らない、ハッシュタグのそろえ方、画像を選ぶ前の見本 |
+| `text.ts` | 募集文の書式（ヘッダ・譲・求・補足・ハッシュタグ）、名前のない商品を「画像で譲（求）と記載しているもの」と書く、名前ありとなしが混ざる場合、求だけのときの「【譲】定価」、ヘッダからハッシュタグを作らない、ハッシュタグのそろえ方、画像を選ぶ前の見本 |
+| `share.ts` | X の文字数の数え方、投稿画面の URL、投稿方法の選び方 |
 | `postSettings.ts` | 募集文の設定の保存と読み込み、壊れた保存内容や使えない保存領域への対応 |
-| `text.ts` / `status.ts` | 募集テキストの書式、チェックの切り替え、集計 |
+| `status.ts` | チェックの切り替え、集計 |
 | `state/reducer.ts` | 番号の振り直し、チェックの排他、個数の範囲、削除と選択の解除 |
 
 テスト用の画像は、DOM なしで作れる `SyntheticImage`（`src/lib/__tests__/synthetic.ts`）で作る。
@@ -226,7 +242,7 @@ flowchart LR
 | FR-13 グリッド分割 | `lib/geometry.ts` の `gridRects`、`EditPanel.tsx` |
 | FR-14〜17 枠の編集 | `ImageEditor.tsx`、`App.tsx`（Delete キー） |
 | FR-20〜26 チェック入力 | `CheckPanel.tsx`、`ImageEditor.tsx`（タップ）、`state/reducer.ts` |
-| FR-30〜37 出力 | `ExportPanel.tsx`、`lib/render.ts`、`lib/text.ts` |
+| FR-30〜38 出力・X に投稿 | `ExportPanel.tsx`、`lib/render.ts`、`lib/text.ts`、`lib/share.ts` |
 | FR-40〜45 募集文の設定 | `PostSettingsForm.tsx`、`App.tsx`（最初の画面・引き継ぎ）、`lib/text.ts`、`lib/postSettings.ts` |
 | NFR-03 端末内処理 | 外部通信なし。画面の下部に注意書き |
 | NFR-08 保守性 | `lib/` と `state/` の単体テスト、`npm run check` |

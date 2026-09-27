@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { renderOutputBlob } from '../lib/render'
+import { X_MAX_WEIGHTED_LENGTH, buildXIntentUrl, chooseXShareMethod, xWeightedLength } from '../lib/share'
 import { hasTradeTargets } from '../lib/status'
 import { buildTradeText } from '../lib/text'
 import type { LoadedImage, OutputOptions, PostSettings, TradeItem } from '../lib/types'
@@ -32,9 +33,11 @@ export function ExportPanel({ image, items, options, onOptionsChange, postSettin
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
+  const [shareNote, setShareNote] = useState<string | null>(null)
   const previewRef = useRef<HTMLDivElement>(null)
 
   const text = useMemo(() => buildTradeText(items, postSettings), [items, postSettings])
+  const weightedLength = xWeightedLength(text)
   // 画像に描くもの（枠・状態・個数）だけで、作り直しが必要かを判断する。募集文や商品名は画像に入らない
   const signature = useMemo(
     () =>
@@ -73,16 +76,42 @@ export function ExportPanel({ image, items, options, onOptionsChange, postSettin
     }
   }
 
-  const canShare = result !== null && typeof navigator.canShare === 'function' && navigator.canShare({ files: [result.file] })
+  /**
+   * X に画像と募集文を渡す。X の Web の投稿画面は画像を受け取れないため、
+   * スマホでは共有メニューで X アプリに画像と文を渡し、PC などでは画像を保存して文入りの投稿画面を開く。
+   */
+  const handleShareToX = async () => {
+    if (!result || stale) return
+    setError(null)
+    setShareNote(null)
+    const canShareFiles =
+      typeof navigator.canShare === 'function' && navigator.canShare({ files: [result.file], text })
+    const touchDevice = typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches
 
-  const handleShare = async () => {
-    if (!result) return
-    try {
-      await navigator.share({ files: [result.file], text })
-    } catch (e) {
-      // 共有シートを閉じただけのときは何もしない
-      if (e instanceof Error && e.name !== 'AbortError') setError('共有できませんでした。画像を保存してから投稿してください。')
+    if (chooseXShareMethod({ canShareFiles, touchDevice }) === 'share-sheet') {
+      try {
+        await navigator.share({ files: [result.file], text })
+      } catch (e) {
+        // 共有メニューを閉じただけのときは何もしない
+        if (!(e instanceof Error && e.name === 'AbortError')) {
+          setError('共有メニューを開けませんでした。画像を保存し、テキストをコピーして X で投稿してください。')
+        }
+      }
+      return
     }
+
+    // ポップアップとして止められないよう、クリックの処理の中ですぐに投稿画面を開く
+    const opened = window.open(buildXIntentUrl(text), '_blank')
+    if (opened) opened.opener = null
+    const link = document.createElement('a')
+    link.href = result.url
+    link.download = result.file.name
+    link.click()
+    setShareNote(
+      opened
+        ? '画像を保存し、募集文を入れた X の投稿画面を開きました。保存した画像を投稿画面に添付してください。'
+        : 'X の投稿画面を開けませんでした（ポップアップがブロックされた可能性があります）。画像は保存したので、テキストをコピーして X で投稿してください。',
+    )
   }
 
   const handleCopy = async () => {
@@ -130,22 +159,31 @@ export function ExportPanel({ image, items, options, onOptionsChange, postSettin
           )}
           <img className="result__image" src={result.url} alt="譲・求のマークを付けた交換募集画像" />
           <div className="button-row">
-            <a className="button button--primary" href={result.url} download={result.file.name}>
+            <button type="button" className="button button--x" disabled={stale} onClick={handleShareToX}>
+              X に投稿
+            </button>
+            <a className="button" href={result.url} download={result.file.name}>
               画像を保存
             </a>
-            {canShare && (
-              <button type="button" className="button" onClick={handleShare}>
-                共有
-              </button>
-            )}
           </div>
-          <p className="panel__hint">スマホでは、画像を長押しして保存することもできます。</p>
+          {shareNote && (
+            <p className="alert alert--info" role="status">
+              {shareNote}
+            </p>
+          )}
+          <p className="panel__hint">
+            スマホでは共有メニューが開くので「X」を選ぶと、画像と募集文がそのまま入ります（文が入らないときは「テキストをコピー」して貼り付けてください）。PC では画像を保存し、募集文を入れた投稿画面を開きます。
+          </p>
         </div>
       )}
 
       <div className="field-group">
         <h3>募集テキスト</h3>
         <textarea className="trade-text" readOnly value={text} rows={Math.min(10, text.split('\n').length + 1)} />
+        <p className={`x-count${weightedLength > X_MAX_WEIGHTED_LENGTH ? ' is-over' : ''}`}>
+          X の文字数の目安：{weightedLength} / {X_MAX_WEIGHTED_LENGTH}（日本語は1文字を2と数えます）
+          {weightedLength > X_MAX_WEIGHTED_LENGTH && '。長すぎて投稿できない場合があります。補足やハッシュタグを短くしてください。'}
+        </p>
         <button type="button" className="button" onClick={handleCopy}>
           {copied ? 'コピーしました' : 'テキストをコピー'}
         </button>

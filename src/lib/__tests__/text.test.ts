@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { countByStatus, displayName, hasTradeTargets, toggleStatus } from '../status'
+import { countByStatus, hasTradeTargets, toggleStatus } from '../status'
 import { buildTradeText, buildTradeTextPreview, normalizeHashtags } from '../text'
 import type { ItemStatus, TradeItem } from '../types'
 
@@ -23,12 +23,7 @@ describe('toggleStatus', () => {
   })
 })
 
-describe('displayName / countByStatus / hasTradeTargets', () => {
-  it('名前が空欄なら No.番号 を表示名にする', () => {
-    expect(displayName(item('none'), 2)).toBe('No.3')
-    expect(displayName(item('none', { name: '  ルカ ' }), 0)).toBe('ルカ')
-  })
-
+describe('countByStatus / hasTradeTargets', () => {
   it('状態ごとの件数を数える', () => {
     const items = [item('extra'), item('extra'), item('wanted'), item('none')]
     expect(countByStatus(items)).toEqual({ none: 1, owned: 0, wanted: 1, extra: 2 })
@@ -40,9 +35,28 @@ describe('displayName / countByStatus / hasTradeTargets', () => {
 describe('buildTradeText', () => {
   const empty = { header: '', note: '', hashtags: '' }
 
-  it('譲・求を番号順に列挙し、2個以上の余分には個数を付ける', () => {
-    const items = [item('wanted'), item('extra', { extraCount: 2 }), item('owned'), item('extra', { name: 'ミク' }), item('wanted')]
-    expect(buildTradeText(items, empty)).toBe('【譲】No.2×2、ミク\n【求】No.1、No.5')
+  it('名前を入れていない商品は、番号ではなく「画像で譲（求）と記載しているもの」と書く', () => {
+    const items = [item('wanted'), item('extra', { extraCount: 2 }), item('owned'), item('extra'), item('wanted')]
+    expect(buildTradeText(items, empty)).toBe('【譲】画像で譲と記載しているもの\n【求】画像で求と記載しているもの')
+  })
+
+  it('名前を入れた商品は名前で書き、2個以上の余分には個数を付ける', () => {
+    const items = [item('extra', { name: ' ミク ', extraCount: 2 }), item('extra', { name: 'ルカ' }), item('wanted', { name: 'リン' })]
+    expect(buildTradeText(items, empty)).toBe('【譲】ミク×2、ルカ\n【求】リン')
+  })
+
+  it('名前がある商品とない商品が混ざるときは、名前のあとに「ほか画像で…」を付ける', () => {
+    const items = [item('extra', { name: 'ミク' }), item('extra'), item('wanted')]
+    expect(buildTradeText(items, empty)).toBe('【譲】ミク、ほか画像で譲と記載しているもの\n【求】画像で求と記載しているもの')
+  })
+
+  it('譲がなく求だけのときは、譲の行を「定価」にする', () => {
+    expect(buildTradeText([item('wanted'), item('owned')], empty)).toBe('【譲】定価\n【求】画像で求と記載しているもの')
+  })
+
+  it('求がないときは「なし」、どちらもないときは両方「なし」', () => {
+    expect(buildTradeText([item('extra')], empty)).toBe('【譲】画像で譲と記載しているもの\n【求】なし')
+    expect(buildTradeText([item('owned')], empty)).toBe('【譲】なし\n【求】なし')
   })
 
   it('ヘッダ・補足・ハッシュタグを、それぞれ独立して入れる', () => {
@@ -53,18 +67,20 @@ describe('buildTradeText', () => {
         note: '郵送のみ',
         hashtags: '〇〇交換 #〇〇譲渡',
       }),
-    ).toBe('【交換】〇〇 LIVE TOUR 2026 ランダムブロマイド\n【譲】No.1\n【求】なし\n郵送のみ\n#〇〇交換 #〇〇譲渡')
+    ).toBe('【交換】〇〇 LIVE TOUR 2026 ランダムブロマイド\n【譲】画像で譲と記載しているもの\n【求】なし\n郵送のみ\n#〇〇交換 #〇〇譲渡')
   })
 
   it('ヘッダからハッシュタグを作らない', () => {
-    expect(buildTradeText([item('wanted')], { ...empty, header: '夏祭り 缶バッジ' })).toBe('夏祭り 缶バッジ\n【譲】なし\n【求】No.1')
+    expect(buildTradeText([item('wanted')], { ...empty, header: '夏祭り 缶バッジ' })).toBe(
+      '夏祭り 缶バッジ\n【譲】定価\n【求】画像で求と記載しているもの',
+    )
   })
 })
 
 describe('buildTradeTextPreview', () => {
-  it('画像を選ぶ前に、譲・求の部分を見本の文にした募集文を作る', () => {
+  it('画像を選ぶ前に、名前を入れない場合の形で募集文の見本を作る', () => {
     expect(buildTradeTextPreview({ header: '【交換】〇〇', note: '', hashtags: '〇〇交換' })).toBe(
-      '【交換】〇〇\n【譲】（チェックした商品が入ります）\n【求】（チェックした商品が入ります）\n#〇〇交換',
+      '【交換】〇〇\n【譲】画像で譲と記載しているもの\n【求】画像で求と記載しているもの\n#〇〇交換',
     )
   })
 })

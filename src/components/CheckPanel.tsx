@@ -34,6 +34,9 @@ export function CheckPanel({ image, items, selectedId, dispatch }: Props) {
       <p className="panel__hint">
         商品ごとに「所持」「未所持」「余分」から1つ選びます。もう一度押すと外れます。画像の上のボタンで状態を選んでから、画像の商品をタップしても付けられます。
       </p>
+      <p className="panel__hint">
+        名前を入れると、募集文にその名前が入ります。空欄の商品は「画像で譲（求）と記載しているもの」とまとめて書きます。
+      </p>
       <dl className="summary">
         <div className="summary__item summary__item--extra">
           <dt>譲</dt>

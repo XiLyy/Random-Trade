@@ -1,4 +1,4 @@
-import { displayName } from './status'
+import { TRADE_MARKS } from './status'
 import type { PostSettings, TradeItem } from './types'
 
 /**
@@ -16,25 +16,40 @@ export function normalizeHashtags(input: string): string[] {
   return tags
 }
 
-/** SNS に貼り付ける募集文を作る */
-export function buildTradeText(items: TradeItem[], settings: PostSettings): string {
-  const extras: string[] = []
-  const wanted: string[] = []
-  items.forEach((item, index) => {
-    const name = displayName(item, index)
-    if (item.status === 'extra') extras.push(item.extraCount > 1 ? `${name}×${item.extraCount}` : name)
-    if (item.status === 'wanted') wanted.push(name)
-  })
-  return composePost(
-    settings,
-    extras.length > 0 ? extras.join('、') : 'なし',
-    wanted.length > 0 ? wanted.join('、') : 'なし',
-  )
+/** 名前を入れていない商品は、番号の代わりにこの言い方でまとめて示す */
+export function imageReference(status: 'extra' | 'wanted'): string {
+  return `画像で${TRADE_MARKS[status]}と記載しているもの`
 }
 
-/** 画像を選ぶ前に、募集文がどうなるかを見せるための見本 */
+/** 譲、または求の商品を募集文の1行分の文にする。対象がなければ null */
+function describeItems(items: TradeItem[], status: 'extra' | 'wanted'): string | null {
+  const targets = items.filter((item) => item.status === status)
+  if (targets.length === 0) return null
+  const named = targets
+    .filter((item) => item.name.trim())
+    .map((item) => {
+      const name = item.name.trim()
+      return status === 'extra' && item.extraCount > 1 ? `${name}×${item.extraCount}` : name
+    })
+  if (named.length === targets.length) return named.join('、')
+  if (named.length === 0) return imageReference(status)
+  return `${named.join('、')}、ほか${imageReference(status)}`
+}
+
+/**
+ * SNS に貼り付ける募集文を作る。
+ * - 名前を入れた商品は名前で、入れていない商品は「画像で譲（求）と記載しているもの」で示す
+ * - 譲がなく求だけのときは、譲の行を「定価」にする（定価で買い取る、という意味の慣用表現）
+ */
+export function buildTradeText(items: TradeItem[], settings: PostSettings): string {
+  const extras = describeItems(items, 'extra')
+  const wanted = describeItems(items, 'wanted')
+  return composePost(settings, extras ?? (wanted ? '定価' : 'なし'), wanted ?? 'なし')
+}
+
+/** 画像を選ぶ前に、募集文がどうなるかを見せるための見本（名前を入れない場合の形） */
 export function buildTradeTextPreview(settings: PostSettings): string {
-  return composePost(settings, '（チェックした商品が入ります）', '（チェックした商品が入ります）')
+  return composePost(settings, imageReference('extra'), imageReference('wanted'))
 }
 
 function composePost(settings: PostSettings, extras: string, wanted: string): string {
