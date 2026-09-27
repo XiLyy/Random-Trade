@@ -4,11 +4,14 @@ import { EditPanel } from './components/EditPanel'
 import { ExportPanel } from './components/ExportPanel'
 import { ImageEditor } from './components/ImageEditor'
 import { STATUS_OPTIONS } from './components/labels'
+import { PostSettingsForm } from './components/PostSettingsForm'
 import { Uploader } from './components/Uploader'
 import { DEFAULT_SENSITIVITY, detectItems } from './lib/detect'
 import { gridRects, unionAll } from './lib/geometry'
 import { getAnalysisImageData, loadImageFile, validateImageFile } from './lib/image'
-import type { ItemStatus, LoadedImage, OutputOptions } from './lib/types'
+import { loadPostSettings, savePostSettings } from './lib/postSettings'
+import { buildTradeTextPreview } from './lib/text'
+import type { ItemStatus, LoadedImage, OutputOptions, PostSettings } from './lib/types'
 import { initialState, reducer, type Mode } from './state/reducer'
 
 const BRUSHES: { status: ItemStatus; label: string }[] = [...STATUS_OPTIONS, { status: 'none', label: 'クリア' }]
@@ -22,7 +25,9 @@ export default function App() {
   const [state, dispatch] = useReducer(reducer, initialState)
   const [brush, setBrush] = useState<ItemStatus>('wanted')
   const [sensitivity, setSensitivity] = useState(DEFAULT_SENSITIVITY)
-  const [options, setOptions] = useState<OutputOptions>({ title: '', note: '', showLegend: true, dimOthers: false })
+  const [options, setOptions] = useState<OutputOptions>({ dimOthers: false })
+  // 募集文の設定は画像を差し替えても残し、次に開いたときのためにこの端末にも保存する
+  const [postSettings, setPostSettings] = useState<PostSettings>(() => loadPostSettings())
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const { image, items, selectedId, mode } = state
@@ -58,6 +63,10 @@ export default function App() {
     },
     [detect, sensitivity],
   )
+
+  useEffect(() => {
+    savePostSettings(postSettings)
+  }, [postSettings])
 
   // 使い終わった画像のオブジェクトURLを解放する
   useEffect(() => {
@@ -106,14 +115,39 @@ export default function App() {
   if (!image) {
     return (
       <Layout>
-        <div className="hero">
-          <p className="hero__lead">
-            公式のラインナップ画像から、
-            <br />
-            「譲」「求」入りの交換募集画像を作ります。
-          </p>
+        <div className="start">
+          <div className="hero">
+            <p className="hero__lead">
+              公式のラインナップ画像から、
+              <br />
+              「譲」「求」入りの交換募集画像を作ります。
+            </p>
+          </div>
+
+          <section className="panel" aria-labelledby="post-heading">
+            <h2 id="post-heading" className="step-heading">
+              <span className="step-heading__no">1</span>募集文を決める
+            </h2>
+            <p className="panel__hint">
+              公演・イベント・アーティストごとに決めておくと、画像を何枚作り直しても同じ文を使えます。入力した内容はこの端末に保存されます。
+            </p>
+            <PostSettingsForm value={postSettings} onChange={setPostSettings} />
+            <div className="post-preview">
+              <span className="post-preview__label">募集文のイメージ</span>
+              <pre className="post-preview__text">{buildTradeTextPreview(postSettings)}</pre>
+            </div>
+          </section>
+
+          <section className="panel" aria-labelledby="upload-heading">
+            <h2 id="upload-heading" className="step-heading">
+              <span className="step-heading__no">2</span>ラインナップ画像を選ぶ
+            </h2>
+            <p className="panel__hint">
+              商品を自動で見つけて枠で囲みます。そのあと「所持」「未所持」「余分」をチェックして、画像を出力します。
+            </p>
+            <Uploader onFile={handleFile} error={error} />
+          </section>
         </div>
-        <Uploader onFile={handleFile} error={error} />
       </Layout>
     )
   }
@@ -198,7 +232,15 @@ export default function App() {
             <>
               <CheckPanel image={image} items={items} selectedId={selectedId} dispatch={dispatch} />
               {/* 画像を差し替えたら古いプレビューを捨てるよう、画像ごとに作り直す */}
-              <ExportPanel key={image.url} image={image} items={items} options={options} onOptionsChange={setOptions} />
+              <ExportPanel
+                key={image.url}
+                image={image}
+                items={items}
+                options={options}
+                onOptionsChange={setOptions}
+                postSettings={postSettings}
+                onPostSettingsChange={setPostSettings}
+              />
             </>
           )}
         </div>

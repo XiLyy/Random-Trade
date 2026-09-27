@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { countByStatus, displayName, hasTradeTargets, toggleStatus } from '../status'
-import { buildTradeText } from '../text'
+import { buildTradeText, buildTradeTextPreview, normalizeHashtags } from '../text'
 import type { ItemStatus, TradeItem } from '../types'
 
 function item(status: ItemStatus, extra: Partial<TradeItem> = {}): TradeItem {
@@ -38,15 +38,43 @@ describe('displayName / countByStatus / hasTradeTargets', () => {
 })
 
 describe('buildTradeText', () => {
+  const empty = { header: '', note: '', hashtags: '' }
+
   it('譲・求を番号順に列挙し、2個以上の余分には個数を付ける', () => {
     const items = [item('wanted'), item('extra', { extraCount: 2 }), item('owned'), item('extra', { name: 'ミク' }), item('wanted')]
-    expect(buildTradeText(items, { title: '', note: '' })).toBe('【譲】No.2×2、ミク\n【求】No.1、No.5')
+    expect(buildTradeText(items, empty)).toBe('【譲】No.2×2、ミク\n【求】No.1、No.5')
   })
 
-  it('タイトルとメモを入れ、タイトルからハッシュタグを作る', () => {
+  it('ヘッダ・補足・ハッシュタグを、それぞれ独立して入れる', () => {
     const items = [item('extra')]
-    expect(buildTradeText(items, { title: ' 夏祭り 缶バッジ ', note: '郵送のみ' })).toBe(
-      '夏祭り 缶バッジ\n【譲】No.1\n【求】なし\n郵送のみ\n#夏祭り缶バッジ交換',
+    expect(
+      buildTradeText(items, {
+        header: ' 【交換】〇〇 LIVE TOUR 2026 ランダムブロマイド ',
+        note: '郵送のみ',
+        hashtags: '〇〇交換 #〇〇譲渡',
+      }),
+    ).toBe('【交換】〇〇 LIVE TOUR 2026 ランダムブロマイド\n【譲】No.1\n【求】なし\n郵送のみ\n#〇〇交換 #〇〇譲渡')
+  })
+
+  it('ヘッダからハッシュタグを作らない', () => {
+    expect(buildTradeText([item('wanted')], { ...empty, header: '夏祭り 缶バッジ' })).toBe('夏祭り 缶バッジ\n【譲】なし\n【求】No.1')
+  })
+})
+
+describe('buildTradeTextPreview', () => {
+  it('画像を選ぶ前に、譲・求の部分を見本の文にした募集文を作る', () => {
+    expect(buildTradeTextPreview({ header: '【交換】〇〇', note: '', hashtags: '〇〇交換' })).toBe(
+      '【交換】〇〇\n【譲】（チェックした商品が入ります）\n【求】（チェックした商品が入ります）\n#〇〇交換',
     )
+  })
+})
+
+describe('normalizeHashtags', () => {
+  it('空白（全角も）や読点で区切り、# を付け、全角の＃を半角にし、重複をまとめる', () => {
+    expect(normalizeHashtags('〇〇交換　＃〇〇譲渡, #〇〇交換、 ##求 ')).toEqual(['#〇〇交換', '#〇〇譲渡', '#求'])
+  })
+
+  it('空なら空の配列', () => {
+    expect(normalizeHashtags('   ')).toEqual([])
   })
 })
