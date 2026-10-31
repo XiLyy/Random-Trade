@@ -28,6 +28,18 @@ export class SyntheticImage implements ImageDataLike {
     return this
   }
 
+  /** 太さ width の線を引く（斜めの透かし文字の線を真似るため） */
+  drawLine(x0: number, y0: number, x1: number, y1: number, width: number, color: RGBA): this {
+    const steps = Math.ceil(Math.hypot(x1 - x0, y1 - y0))
+    const half = Math.floor(width / 2)
+    for (let i = 0; i <= steps; i++) {
+      const x = Math.round(x0 + ((x1 - x0) * i) / steps)
+      const y = Math.round(y0 + ((y1 - y0) * i) / steps)
+      this.fillRect(x - half, y - half, width, width, color)
+    }
+    return this
+  }
+
   /** JPEG のノイズを真似て、各ピクセルの色を ±amount の範囲でずらす（再現性のある疑似乱数を使う） */
   addNoise(amount: number, seed = 1): this {
     let s = seed

@@ -39,6 +39,15 @@ const MAX_DEPTH = 2
 /** くっついたかたまりを、行→列→…と何段まで入れ子に分割するか */
 const MAX_SPLIT_DEPTH = 4
 
+/**
+ * 細い線を消すときの半径（画像の長辺に対する割合）。
+ * これより細い線（透かし文字の線、商品名の文字など）は、オープニングで消える。
+ */
+const THIN_LINE_RATIO = 0.01
+
+/** 枠をふちまで広げるとき、典型的な商品の大きさの何倍まで広げるか */
+const GROW_LIMIT = 1.02
+
 /** 感度を「背景とみなす色の距離（RGB のユークリッド距離）」に変換する */
 export function sensitivityToThreshold(sensitivity: number): number {
   return 10 + (100 - clamp(sensitivity, 0, 100)) * 0.4
@@ -49,23 +58,57 @@ export function detectItems(img: ImageDataLike, options: DetectOptions = {}): Re
   if (W === 0 || H === 0) return []
   const threshold = sensitivityToThreshold(options.sensitivity ?? DEFAULT_SENSITIVITY)
 
-  let boxes = detectInRegion(img, { x0: 0, y0: 0, x1: W, y1: H }, threshold, 0)
-  boxes = mergeOverlapping(boxes)
-  boxes = filterOutliers(boxes)
+  // 通常の方法と、細い線を消してから探す方法の両方で探し、商品らしくそろっている方を使う。
+  // 大きな透かし文字が商品の上や間をまたいでいると、通常の方法では全体が1つのかたまりになってしまう。
+  const plain = findBoxes(img, threshold, 0)
+  const opened = findBoxes(img, threshold, Math.max(1, Math.round(Math.max(W, H) * THIN_LINE_RATIO)))
+  const boxes = isBetterGrid(opened, plain) ? opened : plain
 
   const pad = Math.max(1, Math.round(Math.max(W, H) * 0.006))
   const rects = boxes.map((b) => toRect(expand(b, pad, W, H), W, H))
   return sortByReadingOrder(rects, (r) => r)
 }
 
-function detectInRegion(img: ImageDataLike, region: Box, threshold: number, depth: number): Box[] {
+function findBoxes(img: ImageDataLike, threshold: number, openRadius: number): Box[] {
+  const boxes = detectInRegion(img, { x0: 0, y0: 0, x1: img.width, y1: img.height }, threshold, 0, openRadius)
+  return filterOutliers(mergeOverlapping(boxes))
+}
+
+/**
+ * candidate の方が、同じ大きさの商品の並びとしてはっきりそろっているか。
+ * ラインナップ画像の商品はほぼ同じ大きさのことが多いので、大きさのそろった枠の数で比べる。
+ * 差がなければ通常の方法（細い部品も枠に含められる）を使う。
+ */
+function isBetterGrid(candidate: Box[], current: Box[]): boolean {
+  const candidateCount = uniformCount(candidate)
+  return candidateCount > uniformCount(current) && candidateCount >= candidate.length * 0.8
+}
+
+/** 幅と高さが、どちらも中央値の ±20% に収まる枠の数 */
+function uniformCount(boxes: Box[]): number {
+  if (boxes.length === 0) return 0
+  const w = median(boxes.map((b) => b.x1 - b.x0))
+  const h = median(boxes.map((b) => b.y1 - b.y0))
+  const near = (value: number, ref: number) => value >= ref * 0.8 && value <= ref * 1.2
+  return boxes.filter((b) => near(b.x1 - b.x0, w) && near(b.y1 - b.y0, h)).length
+}
+
+function detectInRegion(
+  img: ImageDataLike,
+  region: Box,
+  threshold: number,
+  depth: number,
+  openRadius: number,
+): Box[] {
   const rw = region.x1 - region.x0
   const rh = region.y1 - region.y0
   const regionArea = rw * rh
   const minArea = img.width * img.height * 0.001
 
   const background = estimateBackground(img, region)
-  const mask = foregroundMask(img, region, background, threshold)
+  let mask = foregroundMask(img, region, background, threshold)
+  // 細い線（透かし文字など）を消す。商品どうしが透かし文字でつながっていても、切り離せる
+  if (openRadius > 0) mask = dilate(erode(mask, rw, rh, openRadius), rw, rh, openRadius)
   // 商品の中の細かい隙間（透明なアクリル部分など）を埋めて、1つのかたまりにする
   const radius = Math.max(1, Math.round(Math.max(img.width, img.height) * 0.006))
   const closed = erode(dilate(mask, rw, rh, radius), rw, rh, radius)
@@ -73,11 +116,15 @@ function detectInRegion(img: ImageDataLike, region: Box, threshold: number, dept
   // 格子状に並んだ商品の間の「谷」を探すときの、1つの商品の最小の幅（画像の長辺の 2%）
   const minSegment = Math.max(4, Math.round(Math.max(img.width, img.height) * 0.02))
 
+  // 細い線を消したあとは、すき間に透かし文字の消え残りがわずかにあっても、何もない行とみなす
+  const captionGap = openRadius > 0 ? 0.15 : 0
+
   const result: Box[] = []
+  const own: Box[] = []
   for (const c of connectedComponents(closed, rw, rh)) {
     if (c.count < 16) continue
     // すき間の細いカードの並びや、すき間をまたぐ透かし文字でつながったかたまりを、商品ごとに分ける
-    for (const piece of splitByGutters(mask, rw, c, minSegment)) {
+    for (const piece of splitByGutters(mask, rw, c, minSegment, captionGap)) {
       const box: Box = {
         x0: piece.x0 + region.x0,
         y0: piece.y0 + region.y0,
@@ -90,7 +137,7 @@ function detectInRegion(img: ImageDataLike, region: Box, threshold: number, dept
         // 範囲の大半を覆うかたまりは、商品をまとめて載せた台紙の可能性がある。
         // その内側で背景を推定し直して、もう一度探す。
         if (depth < MAX_DEPTH) {
-          const inner = detectInRegion(img, box, threshold, depth + 1)
+          const inner = detectInRegion(img, box, threshold, depth + 1, openRadius)
           if (inner.length >= 2) {
             result.push(...inner)
             continue
@@ -99,10 +146,65 @@ function detectInRegion(img: ImageDataLike, region: Box, threshold: number, dept
         // 内側でも分けられないときは、背景を分離できなかったとみなして捨てる
         continue
       }
-      result.push(box)
+      own.push(box)
     }
   }
-  return result
+  growToEdges(img, region, background, threshold, own, result)
+  return [...result, ...own]
+}
+
+/**
+ * 典型的な大きさより小さい枠を、商品のふちまで広げる。
+ *
+ * 写真の背景が明るいなど、商品の一部が背景とほぼ同じ色だと、その部分が枠から外れる。
+ * 背景とのわずかな色の差も拾う細かいマスクで、枠の外側の列（行）がほぼ埋まっている間だけ広げる。
+ * 広げるのは典型的な大きさまでで、ほかの枠とは重ならないようにする。
+ */
+function growToEdges(
+  img: ImageDataLike,
+  region: Box,
+  background: RGB[],
+  threshold: number,
+  boxes: Box[],
+  others: Box[],
+) {
+  if (boxes.length < 2) return
+  const ref = typicalSize(boxes)
+  const maxW = ref.w * GROW_LIMIT
+  const maxH = ref.h * GROW_LIMIT
+  if (!boxes.some((b) => b.x1 - b.x0 < maxW * 0.95 || b.y1 - b.y0 < maxH * 0.95)) return
+
+  const rw = region.x1 - region.x0
+  const fine = foregroundMask(img, region, background, Math.min(threshold, Math.max(12, threshold * 0.5)))
+  /** 範囲の中の列 x（y0〜y1）または行 y（x0〜x1）が、細かいマスクの前景でほぼ埋まっているか */
+  const filled = (vertical: boolean, at: number, from: number, to: number) => {
+    let count = 0
+    for (let i = from; i < to; i++) {
+      count += vertical ? fine[(i - region.y0) * rw + at - region.x0] : fine[(at - region.y0) * rw + i - region.x0]
+    }
+    return count >= (to - from) * 0.9
+  }
+  const all = [...others, ...boxes]
+  const inside = (b: Box) => b.x0 >= region.x0 && b.y0 >= region.y0 && b.x1 <= region.x1 && b.y1 <= region.y1
+
+  for (const b of boxes) {
+    // 文字などの小さすぎるものは広げない
+    if (boxAreaOf(b) < ref.area * 0.2) continue
+    for (const side of ['x0', 'x1', 'y0', 'y1'] as const) {
+      const vertical = side[0] === 'x'
+      const step = side[1] === '0' ? -1 : 1
+      for (;;) {
+        if (vertical ? b.x1 - b.x0 >= maxW : b.y1 - b.y0 >= maxH) break
+        const next = { ...b, [side]: b[side] + step }
+        // 新しく枠に入る列（行）
+        const line = step < 0 ? next[side] : b[side]
+        const [from, to] = vertical ? [b.y0, b.y1] : [b.x0, b.x1]
+        if (!inside(next) || !filled(vertical, line, from, to)) break
+        if (all.some((o) => o !== b && boxIntersection(o, next) > 0)) break
+        b[side] = next[side]
+      }
+    }
+  }
 }
 
 /**
@@ -112,31 +214,40 @@ function detectInRegion(img: ImageDataLike, region: Box, threshold: number, dept
  * すき間を透かし文字がまたいでいても、谷の部分は前景が少ないので見つけられる。
  * 1つの商品を誤って切らないよう、分割後の断片がほぼ同じ大きさのときだけ分割する。
  */
-function splitByGutters(mask: Uint8Array, stride: number, box: Box, minSegment: number, depth = 0): Box[] {
+function splitByGutters(
+  mask: Uint8Array,
+  stride: number,
+  box: Box,
+  minSegment: number,
+  captionGap: number,
+  depth = 0,
+): Box[] {
   if (depth >= MAX_SPLIT_DEPTH) return [box]
   const segments =
     findGridSegments(mask, stride, box, 'x', minSegment) ??
     findGridSegments(mask, stride, box, 'y', minSegment) ??
-    findCaption(mask, stride, box)
+    findCaption(mask, stride, box, captionGap)
   if (!segments) return [box]
   return segments.flatMap((segment) => {
     const trimmed = trimToForeground(mask, stride, segment)
-    return trimmed ? splitByGutters(mask, stride, trimmed, minSegment, depth + 1) : []
+    return trimmed ? splitByGutters(mask, stride, trimmed, minSegment, captionGap, depth + 1) : []
   })
 }
 
 /**
  * 商品のすぐ上か下に、何も描かれていない行をはさんで細い帯（商品名などの文字）があれば切り離す。
  * 切り離した帯は、あとの外れ値の除去で小さすぎるものとして捨てられる。
+ * 前景の割合が gap 以下の行も、何も描かれていない行とみなす。
  */
-function findCaption(mask: Uint8Array, stride: number, box: Box): Box[] | null {
+function findCaption(mask: Uint8Array, stride: number, box: Box, gap: number): Box[] | null {
   const height = box.y1 - box.y0
+  const limit = Math.floor((box.x1 - box.x0) * gap)
   const empty = new Uint8Array(height)
   for (let i = 0; i < height; i++) {
     const row = (box.y0 + i) * stride
-    let any = 0
-    for (let x = box.x0; x < box.x1 && !any; x++) any = mask[row + x]
-    empty[i] = any ? 0 : 1
+    let count = 0
+    for (let x = box.x0; x < box.x1 && count <= limit; x++) count += mask[row + x]
+    empty[i] = count > limit ? 0 : 1
   }
   // 何も描かれていない行が続く区間のうち、いちばん長いもので上下に分ける
   let best: [number, number] | null = null
@@ -452,15 +563,25 @@ function filterOutliers(boxes: Box[]): Box[] {
   })
   if (shaped.length <= 1) return shaped
 
-  const byArea = [...shaped].sort((a, b) => boxAreaOf(b) - boxAreaOf(a))
-  const top = byArea.slice(0, Math.ceil(byArea.length / 2))
-  const median = (values: number[]) => values.sort((a, b) => a - b)[Math.floor(values.length / 2)]
-  const refArea = median(top.map(boxAreaOf))
-  const refW = median(top.map((b) => b.x1 - b.x0))
-  const refH = median(top.map((b) => b.y1 - b.y0))
+  const ref = typicalSize(shaped)
   return shaped.filter(
-    (b) => boxAreaOf(b) >= refArea * 0.2 && b.x1 - b.x0 >= refW * 0.45 && b.y1 - b.y0 >= refH * 0.45,
+    (b) => boxAreaOf(b) >= ref.area * 0.2 && b.x1 - b.x0 >= ref.w * 0.45 && b.y1 - b.y0 >= ref.h * 0.45,
   )
+}
+
+/** 典型的な商品の大きさ。面積が大きい方の半分の枠の、面積・幅・高さの中央値 */
+function typicalSize(boxes: Box[]): { area: number; w: number; h: number } {
+  const byArea = [...boxes].sort((a, b) => boxAreaOf(b) - boxAreaOf(a))
+  const top = byArea.slice(0, Math.ceil(byArea.length / 2))
+  return {
+    area: median(top.map(boxAreaOf)),
+    w: median(top.map((b) => b.x1 - b.x0)),
+    h: median(top.map((b) => b.y1 - b.y0)),
+  }
+}
+
+function median(values: number[]): number {
+  return [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)]
 }
 
 function expand(b: Box, pad: number, w: number, h: number): Box {

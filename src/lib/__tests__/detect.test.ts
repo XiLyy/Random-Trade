@@ -17,6 +17,26 @@ function expectToCover(rect: Rect, img: SyntheticImage, x: number, y: number, w:
   expect(px.y + px.h - (y + h)).toBeLessThan(tolerance)
 }
 
+/**
+ * 写真のブロマイドを真似て、段ごとに中央寄せで 100×70 の写真を並べる。
+ * 写真の背景は薄いグレーで、中に人物（濃い色）があり、下に商品名の色付きの帯がある。各写真の左上座標を返す
+ */
+function drawPhotoRows(img: SyntheticImage, counts: number[]): { x: number; y: number }[] {
+  const positions: { x: number; y: number }[] = []
+  counts.forEach((count, row) => {
+    const y = 20 + row * 100
+    const left = (img.width - (count * 100 + (count - 1) * 12)) / 2
+    for (let c = 0; c < count; c++) {
+      const x = left + c * 112
+      img.fillRect(x, y, 100, 70, [232, 231, 236])
+      img.fillRect(x + 35, y + 15, 30, 55, [150, 100, 90])
+      img.fillRect(x + 20, y + 76, 60, 9, [120, 190, 200])
+      positions.push({ x, y })
+    }
+  })
+  return positions
+}
+
 describe('detectItems', () => {
   it('白背景に格子状に並んだ商品を、読む順ですべて検出する', () => {
     const img = new SyntheticImage(400, 300)
@@ -91,6 +111,34 @@ describe('detectItems', () => {
 
     expect(rects).toHaveLength(15)
     rects.forEach((rect, i) => expectToCover(rect, img, positions[i].x, positions[i].y, 76))
+  })
+
+  it('太い透かし文字が商品の上や間をまたいで全体がつながっていても、1枚ずつ分ける', () => {
+    // 白背景に、薄いグレーの背景の写真が 3・2・3・2 枚。下に商品名の色付きの帯があり、
+    // 写真の背景とほぼ同じ色の太い透かし文字が、斜めに写真とすき間をまたいでいる
+    const img = new SyntheticImage(420, 420)
+    const positions = drawPhotoRows(img, [3, 2, 3, 2])
+    for (let i = 0; i < 6; i++) {
+      img.drawLine(-40 + i * 90, 60 + i * 60, 120 + i * 90, 0 + i * 60, 5, [226, 226, 226])
+      img.drawLine(-40 + i * 90, 380 - i * 50, 140 + i * 90, 320 - i * 50, 5, [226, 226, 226])
+    }
+
+    const rects = detectItems(img)
+
+    expect(rects).toHaveLength(10)
+    rects.forEach((rect, i) => expectToCover(rect, img, positions[i].x, positions[i].y, 100, 70))
+  })
+
+  it('写真の背景の一部が背景とほぼ同じ色でも、写真のふちまで枠に含める', () => {
+    const img = new SyntheticImage(420, 420)
+    const positions = drawPhotoRows(img, [3, 2, 3, 2])
+    // 2枚目の左 3 割だけ、照明で明るくなって背景（白）との色の距離が約 20 になっている
+    img.fillRect(positions[1].x, positions[1].y, 30, 70, [243, 243, 247])
+
+    const rects = detectItems(img)
+
+    expect(rects).toHaveLength(10)
+    rects.forEach((rect, i) => expectToCover(rect, img, positions[i].x, positions[i].y, 100, 70))
   })
 
   it('商品のすぐ下の商品名は、枠に含めない', () => {
