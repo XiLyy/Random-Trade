@@ -1,4 +1,4 @@
-import { ANALYSIS_MAX_SIDE } from './detect'
+import { analysisScale } from './detect'
 import type { LoadedImage } from './types'
 
 export const MAX_FILE_BYTES = 30 * 1024 * 1024
@@ -29,9 +29,9 @@ export async function loadImageFile(file: File): Promise<LoadedImage> {
   }
 }
 
-/** 自動認識用に、長辺を ANALYSIS_MAX_SIDE まで縮小したピクセルデータを取り出す */
+/** 自動認識用に、画素数が ANALYSIS_MAX_PIXELS 以下になるよう縮小したピクセルデータを取り出す */
 export function getAnalysisImageData(image: HTMLImageElement): ImageData {
-  const scale = Math.min(1, ANALYSIS_MAX_SIDE / Math.max(image.naturalWidth, image.naturalHeight))
+  const scale = analysisScale(image.naturalWidth, image.naturalHeight)
   const width = Math.max(1, Math.round(image.naturalWidth * scale))
   const height = Math.max(1, Math.round(image.naturalHeight * scale))
   const canvas = document.createElement('canvas')
